@@ -13,7 +13,7 @@ import {
   Alert
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import * as DocumentPicker from 'expo-document-picker'; // Dosya seçici
+import * as DocumentPicker from 'expo-document-picker'; 
 
 // Backend Adresi (iOS Simülatör için)
 const API_URL = 'http://127.0.0.1:8000/api/v1';
@@ -21,18 +21,20 @@ const API_URL = 'http://127.0.0.1:8000/api/v1';
 export default function App() {
   const [message, setMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [isUploading, setIsUploading] = useState(false); // Yükleme durumu
+  const [isUploading, setIsUploading] = useState(false);
   
+  // YENİ: Aktif dosya ismini tutacak değişken
+  const [currentFileName, setCurrentFileName] = useState(null); 
+
   const [chatHistory, setChatHistory] = useState([
     { id: '1', text: 'Selam! Ben Synapse AI. Önce yukarıdan bir PDF yükle, sonra sorunu sor! 🧠', sender: 'bot' }
   ]);
 
-  // 1. DOSYA SEÇME VE YÜKLEME FONKSİYONU
+  // 1. DOSYA SEÇME VE YÜKLEME
   const pickDocument = async () => {
     try {
-      // Dosya Seçiciyi Aç
       const result = await DocumentPicker.getDocumentAsync({
-        type: 'application/pdf', // Sadece PDF
+        type: 'application/pdf',
         copyToCacheDirectory: true,
       });
 
@@ -41,15 +43,13 @@ export default function App() {
       const file = result.assets[0];
       setIsUploading(true);
 
-      // Gönderilecek Paketi Hazırla (FormData)
       const formData = new FormData();
       formData.append('file', {
         uri: file.uri,
         name: file.name,
-        type: 'application/pdf', // Backend PDF bekliyor
+        type: 'application/pdf',
       });
 
-      // Backend'e Gönder (/upload)
       const response = await fetch(`${API_URL}/upload`, {
         method: 'POST',
         body: formData,
@@ -61,11 +61,14 @@ export default function App() {
       const data = await response.json();
 
       if (response.ok) {
-        Alert.alert("Başarılı! 🎉", `${file.name} hafızaya kaydedildi. Şimdi soru sorabilirsin.`);
-        // Bot da mesaj atsın
+        // BAŞARILI OLURSA DOSYA ADINI HAFIZAYA AT
+        setCurrentFileName(file.name); 
+        
+        Alert.alert("Başarılı! 🎉", `${file.name} hafızaya kaydedildi. Mod: Odaklanmış.`);
+        
         setChatHistory(prev => [...prev, { 
           id: Date.now().toString(), 
-          text: `📄 "${file.name}" dosyasını okudum ve hafızama attım. Sor gelsin!`, 
+          text: `📄 "${file.name}" dosyasını okudum. Artık sadece bu dosyayla ilgili soruları cevaplayacağım.`, 
           sender: 'bot' 
         }]);
       } else {
@@ -80,7 +83,7 @@ export default function App() {
     }
   };
 
-  // 2. MESAJ GÖNDERME FONKSİYONU
+  // 2. MESAJ GÖNDERME (GÜNCELLENDİ)
   const handleSend = async () => {
     if (message.trim().length === 0) return;
 
@@ -92,6 +95,7 @@ export default function App() {
     setIsLoading(true);
 
     try {
+      // Backend'e hem soruyu hem de dosya adını gönderiyoruz
       const response = await fetch(`${API_URL}/ask`, {
         method: 'POST',
         headers: {
@@ -99,7 +103,8 @@ export default function App() {
         },
         body: JSON.stringify({
           question: originalMessage,
-          model_type: 'flash' 
+          model_type: 'flash',
+          file_name: currentFileName // <-- İŞTE SİHİR BURADA!
         }),
       });
 
@@ -110,7 +115,8 @@ export default function App() {
           id: (Date.now() + 1).toString(), 
           text: data.answer, 
           sender: 'bot',
-          model: data.used_model
+          model: data.used_model,
+          source: currentFileName // Cevabın hangi dosyadan geldiğini bilelim
         };
         setChatHistory(prev => [...prev, botResponse]);
       } else {
@@ -140,8 +146,12 @@ export default function App() {
       ]}>
         {item.text}
       </Text>
+      {/* Model ve Kaynak Bilgisi */}
       {item.model && (
-        <Text style={styles.modelText}>⚡ {item.model}</Text>
+        <View style={styles.metaContainer}>
+           <Text style={styles.modelText}>⚡ {item.model}</Text>
+           {item.source && <Text style={styles.sourceText}>📄 {item.source}</Text>}
+        </View>
       )}
     </View>
   );
@@ -150,7 +160,6 @@ export default function App() {
     <SafeAreaView style={styles.container}>
       <StatusBar style="dark" />
       
-      {/* HEADER: Başlık ve Yükle Butonu */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Synapse 🧠</Text>
         <TouchableOpacity 
@@ -165,6 +174,13 @@ export default function App() {
           )}
         </TouchableOpacity>
       </View>
+      
+      {/* Hangi dosyada olduğumuzu gösteren minik bilgi çubuğu */}
+      {currentFileName && (
+        <View style={styles.infoBar}>
+          <Text style={styles.infoText}>Aktif Dosya: {currentFileName}</Text>
+        </View>
+      )}
 
       <FlatList
         data={chatHistory}
@@ -180,7 +196,7 @@ export default function App() {
         <View style={styles.inputContainer}>
           <TextInput
             style={styles.input}
-            placeholder="Sorunu sor..."
+            placeholder={currentFileName ? "Dosya hakkında sor..." : "Önce dosya yükle..."}
             value={message}
             onChangeText={setMessage}
             placeholderTextColor="#999"
@@ -213,8 +229,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#ddd',
-    flexDirection: 'row', // Yan yana diz
-    justifyContent: 'space-between', // Aralarını aç
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
     marginTop: Platform.OS === 'android' ? 30 : 0,
   },
@@ -224,7 +240,7 @@ const styles = StyleSheet.create({
     color: '#333',
   },
   uploadButton: {
-    backgroundColor: '#34C759', // Yeşil renk
+    backgroundColor: '#34C759',
     paddingHorizontal: 15,
     paddingVertical: 8,
     borderRadius: 15,
@@ -233,6 +249,18 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: 'bold',
     fontSize: 14,
+  },
+  infoBar: {
+    backgroundColor: '#E8F5E9',
+    padding: 5,
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: '#C8E6C9'
+  },
+  infoText: {
+    color: '#2E7D32',
+    fontSize: 12,
+    fontWeight: '600'
   },
   listContent: {
     padding: 15,
@@ -266,11 +294,20 @@ const styles = StyleSheet.create({
   botText: {
     color: '#000',
   },
+  metaContainer: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: 5,
+    gap: 10
+  },
   modelText: {
     fontSize: 10,
     color: '#999',
-    marginTop: 5,
-    alignSelf: 'flex-end',
+  },
+  sourceText: {
+    fontSize: 10,
+    color: '#34C759',
+    fontWeight: 'bold'
   },
   inputContainer: {
     flexDirection: 'row',
